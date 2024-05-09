@@ -1,0 +1,70 @@
+import cv2
+import dlib
+import mtcnn
+import numpy as np
+import time
+from google.colab.patches import cv2_imshow
+import mediapipe as mp
+
+img_name = '/content/example 4.jpg'
+
+methods = {
+    "Haar": cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'),
+    "HOG": dlib.get_frontal_face_detector(),
+    "MTCNN": mtcnn.MTCNN(),
+    "MediaPipe": mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+}
+
+
+for name, method in methods.items():
+
+    start = time.time()
+
+    if name == "Haar":
+        image = cv2.imread(img_name)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        faces_og = method.detectMultiScale(gray, 1.3, 5)
+
+        faces = [[int(x), int(y), int(x + w), int(y + h)] for (x, y, w, h) in faces_og]
+
+    elif name == "HOG":
+        image = cv2.imread(img_name)
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        faces_og = method(rgb, 0)
+        faces=[]
+        for face in faces_og:
+          faces.append([face.left(), face.top(), face.right(), face.bottom()])
+
+    elif name == "MTCNN":
+        image = cv2.imread(img_name)
+        faces = method.detect_faces(image)
+
+        faces = [[int(x), int(y), int(x + w), int(y + h)] for result in faces for (x, y, w, h) in [result["box"]]]
+
+    elif name == "MediaPipe":
+        image = cv2.imread(img_name)
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        frame_height, frame_width, _ = rgb.shape
+        results = method.process(rgb)
+        faces = []
+        if results.detections:
+            for detection in results.detections:
+                bboxC = detection.location_data.relative_bounding_box
+                ih, iw, _ = image.shape
+                x, y, w, h = int(bboxC.xmin * iw), int(bboxC.ymin * ih), int(bboxC.width * iw), int(bboxC.height * ih)
+                faces.append([x, y, x + w, y + h])
+
+    end = time.time()
+    print(f"{name}: {end - start:.4f} seconds")
+
+    for face in faces:
+        (x1, y1, x2, y2) = (face[0], face[1], face[2], face[3])
+        #cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        face_region = image[ y1:y2, x1:x2]
+        blurred_face_region = cv2.GaussianBlur(face_region, (23, 23), 30)
+        image[ y1:y2, x1:x2] = blurred_face_region
+
+
+    cv2_imshow(image)
