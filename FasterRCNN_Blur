@@ -1,0 +1,71 @@
+import pickle
+import cv2
+import numpy as np
+import torch
+import torchvision
+from torchvision.transforms import functional as F
+from PIL import Image
+
+image_path = "example 2.jpg"
+
+def extract_gabor_features(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Define Gabor filter parameters
+    ksize = 5  # Size of the filter
+    sigma = 1.0  # Standard deviation of the filter
+    theta = np.pi / 4  # Orientation of the filter
+    lambd = 2.0  # Wavelength of the sinusoidal factor
+    gamma = 0.5  # Spatial aspect ratio
+
+    gabor_filter = cv2.getGaborKernel((ksize, ksize), sigma, theta, lambd, gamma, 0, ktype=cv2.CV_32F)
+
+    filtered_image = cv2.filter2D(gray, cv2.CV_8UC3, gabor_filter)
+
+    features = filtered_image.flatten()
+
+    return features
+
+
+def interpolate_color(value):
+    red = int(255 * (1 - value))
+    green = int(255 * value)
+
+    return red, green, 0
+
+
+classifier = pickle.load(open('classifier.pkl', 'rb'))
+scaler = pickle.load(open("scaler.pkl", 'rb'))
+pca = pickle.load(open("pca.pkl", 'rb'))
+
+model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+model.eval()
+
+image = Image.open(image_path)
+image_tensor = F.to_tensor(image).unsqueeze(0)
+
+with torch.no_grad():
+    predictions = model(image_tensor)
+
+boxes = predictions[0]['boxes']
+scores = predictions[0]['scores']
+
+image = cv2.imread(image_path)
+image_drawn = image
+for box in boxes:
+    x_min, y_min, x_max, y_max = [int(num) for num in box.tolist()]
+    patch = image[y_min:y_max, x_min:x_max]
+    patch = cv2.resize(patch, (256, 256), interpolation=cv2.INTER_AREA)
+    features = extract_gabor_features(patch)
+    test_features = np.array(features).reshape(1, -1)
+    test_features_standardized = scaler.transform(test_features)
+    test_features_pca = pca.transform(test_features_standardized)
+
+    faces = classifier.predict_proba(test_features_pca)
+    if faces[0][1] > 0.5:
+        face_region = image[y_min:y_max, x_min:x_max]
+        blurred_face_region = cv2.GaussianBlur(face_region, (23, 23), 30)
+        image[y_min:y_max, x_min:x_max] = blurred_face_region
+
+cv2.imshow("RESULT", image)
+cv2.waitKey(0)
